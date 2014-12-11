@@ -28,7 +28,7 @@ int check_cluster_number(struct direntry *dirent, uint8_t *image_buf, struct bpb
      * modify the cluster chain via the FAT to make it consistent with the directory entry
      */
     else if(clusters_fat > clusters_meta){
-        printf("\tBAD:\tFile size in the metadata is smaller than the cluster chain length for the file would suggest.\n");       
+        printf("\t*BAD:\tFile size in the metadata is smaller than the cluster chain length for the file would suggest.\n");       
                 
         //modify FAT
         int i = 0;
@@ -51,7 +51,7 @@ int check_cluster_number(struct direntry *dirent, uint8_t *image_buf, struct bpb
      * If the directory entry file size is greater than the size indicated by the cluster chain, update the directory entry
      */
     else{
-        printf("\tBAD:\tFile size in the metadata that is larger than the cluster chain for the file would suggest.\n");
+        printf("\t*BAD:\tFile size in the metadata that is larger than the cluster chain for the file would suggest.\n");
         uint32_t bytes_needed = getulong(dirent->deFileSize);
         int new_filesize = clusters_fat * cluster_size;
         printf("\t\tFile size in metadata modified from %d(%d clusters) to %d(%d clusters).\n",bytes_needed,clusters_meta,new_filesize,clusters_fat);  
@@ -88,15 +88,21 @@ void FAT_scan(struct direntry *dirent, uint8_t *image_buf, struct bpb33 *bpb, in
         fwrite(p, 1, nbytes, stdout);
         bytes_remaining -= nbytes; */
         if(option==0){
-            clusters_fat++;   
+            clusters_fat++; 
         }else if(option==1){
             arr[cluster]=0;
         }
-        if(get_fat_entry(cluster, image_buf, bpb) == CLUST_BAD){
-            printf("bad cluster detected\n");
+        
+        //if the next cluster is bad, we change the pointer of the current cluster
+        uint16_t next = get_fat_entry(cluster, image_buf, bpb);
+        if(get_fat_entry(next, image_buf, bpb) == (CLUST_BAD&FAT12_MASK)){
+            printf("\t*BAD:\tBad cluster %d detected and removed from chain.\n",next);
+            set_fat_entry(cluster, next+1, image_buf, bpb);
+            cluster = next+1;
+        }else{
+            cluster = next;
         }
         
-        cluster = get_fat_entry(cluster, image_buf, bpb);        
     }
     //printf("HERE'S A NOT VALID CLUSTER: %d\n",cluster);
     
@@ -346,22 +352,23 @@ void check_unassigned(uint8_t *image_buf, struct bpb33* bpb){
     int total_clusters = bpb->bpbSectors / bpb->bpbSecPerClust;
     int clusters_status[total_clusters];
     for(int i=2; i<total_clusters; i++){
-        if(get_fat_entry(i, image_buf, bpb) == CLUST_FREE){
+        if(get_fat_entry(i, image_buf, bpb) == (CLUST_FREE&FAT12_MASK) || get_fat_entry(i, image_buf, bpb) == (CLUST_BAD&FAT12_MASK)){
 		    clusters_status[i]=0;	
 	    }else{
 	        clusters_status[i]=1;
-	    }   
+	    }  
     }
     traverse_root(image_buf,bpb,1,clusters_status);
     
     int num_orphans = 0;
+    printf("\n");
     for(int i=5; i<total_clusters; i++){ //start at 2??? 5???
         if(clusters_status[i]==1){
             //printf("%d\n",i);
             num_orphans++;
             char name[MAXFILENAME];
             sprintf(name,"FOUND%d.DAT",num_orphans);
-            printf("\tBAD:\tCluster %d is unassigned but not freed. Now in directory as %s.\n",i,name);       
+            printf("*BAD:\tCluster %d is unassigned but not freed. Now in directory as %s.\n",i,name);       
             
             struct direntry *dirent = (struct direntry*)cluster_to_addr(0, image_buf, bpb);
             long size = bpb->bpbSecPerClust * bpb->bpbBytesPerSec;  //not sure if this is the right size
