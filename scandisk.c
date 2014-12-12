@@ -1,3 +1,7 @@
+/*
+ * Zach Abt, Soo Bin Kwon
+ */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
